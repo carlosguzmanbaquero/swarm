@@ -1,0 +1,243 @@
+// Iniciar docker swarm
+docker swarm init
+
+// Obtener token para unir manager
+docker swarm join-token manager
+
+// Ver los nodos que tenemos
+docker node ls
+
+// Ver información del nodo
+docker node inspect self
+
+docker node inspect --pretty self
+
+// Salir del modo swarm
+docker swarm leave
+
+//si un worker node se va, dará error, podemos forzarlo.
+docker swarm leave --force 
+
+//crear un servicio
+docker service create --name pinger alpine ping www.google.com
+
+//lustar servicios
+docker service ls
+
+// Ver estado de un servicio
+docker service ps nombreServicio
+
+// Ver información de un servicio
+docker service inspect nombreServicio
+
+// Ver logs
+docker service logs -f nombreServicio
+
+// Eliminar servicio
+docker service rm nombreServicio
+
+//Creamos el nodo manager
+docker swarm init --advertise-addr <MANAGER-IP>
+docker swarm init --advertise-addr 192.168.0.18
+
+//Creamos una nueva instancia en play-with-docker (+ ADD NEW INSTANCE)
+docker swarm join --token <TOKEN> <MANAGER-IP>:<PORT>
+docker swarm join --token SWMTKN-1-32cege8duoof9cr405bi1fsmcga831l6fcecmznp5cxcfdc3vg-ci6f98tjfy9fzhr2swmmo3ter 192.168.0.18:2377
+
+//Creamos otra nueva instancia en play-with-docker (+ ADD NEW INSTANCE)
+docker swarm join --token <TOKEN> <MANAGER-IP>:<PORT>
+docker swarm join --token SWMTKN-1-32cege8duoof9cr405bi1fsmcga831l6fcecmznp5cxcfdc3vg-ci6f98tjfy9fzhr2swmmo3ter 192.168.0.18:2377
+
+//Nos dirigimos a la terminal del nodo MANAGER, observamos los 3 nodos
+docker node ls
+
+//Crear un servicio en este caso multinodo
+docker service create --name pinger alpine ping www.google.com
+
+//Ver listado de servicios
+docker service ls
+
+//Donde estan asignado las tareas de este servicio, nos indica que esta en el nodo 1
+docker service ps pinger
+
+//Podemos ver el container
+docker ps
+
+//Cambia el numero de tareas
+docker service scale pinger=5
+
+// Ver las tareas del servicio
+docker service ps pinger
+
+// Ver los logs del servicio
+docker service logs -f pinger
+
+// Ver la configuración del servicio
+docker service inspect pinger
+
+// actualizar alguna configuración del servicio
+docker service update --args "ping www.amazon.com" pinger
+
+// realiza rollback o cambia al spec anterior 
+docker service rollback pinger
+
+//Actualizar las replicas de un servicio
+docker service update --replicas=20 pinger
+
+//Actualizar paralelismo y orden de la configuración de update en el servicio pinger
+docker service update --update-parallelism 4 --update-order start-first pinger
+
+//Actualizar accion en fallo y radio maximo de falla de la configuración de update en el servicio pinger
+docker service update --update-failure-action rollback --update-max-failure-ratio 0.5 pinger
+
+//Actualizar paralelismo de la configuracion de rollback en el servicio de pinger
+docker service update --rollback-parallelism 0 pinger
+
+//desplegar proyecto
+docker build -t carlosguzmanbaquero/swarm-hostname .
+docker login
+docker push  carlosguzmanbaquero/swarm-hostname:latest
+docker node ls
+docker service create --name app --publish 3000:3000 --replicas=3 carlosguzmanbaquero/swarm-hostname:latest
+docker service create --name app -d --publish 3000:3000 --replicas=3 carlosguzmanbaquero/swarm-hostname:latest
+curl http://ip172-18-0-99-c3g6j2nqf8u000flssi0-3000.direct.labs.play-with-docker.com/
+
+//creando mas replicas
+docker service scale app=6
+docker service ps app
+docker ps
+docker network ls
+
+//lo que no se puede hacer es crar mas de un servicio en el mismo puerto
+docker service create --name app --publish 3000:3000 --replicas=3 carlosguzmanbaquero/swarm-hostname:latest
+
+//visualizer para ver los docker mas organizados en un entorno visual
+docker service create -d --name viz -p 8080:8080 --constraint=node.role==manager --mount=type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock dockersamples/visualizer
+
+//reubicar los servicios para que sean ejecutados solo en los workers
+docker service update --constraint-add node.role==worker --update-parallelism=0 app
+
+//inspeccionar el worker2
+docker  node inspect --pretty worker2
+
+//vaciar el worker
+docker node update --availability drain worker2
+
+//activar worker
+docker node update --availability active worker2
+
+//actualizar para forzar la distribucion de la app en los worker
+docker service update -d --env-add UNA_VARIABLE=de-entorno --update-parallelism=0 app
+
+//ver opciones de network
+docker network 
+
+//crear network
+docker network create --driver overlay app-net
+
+//inspeccionar network
+docker network inspect app-net
+
+//desplegar network
+docker build -t carlosguzmanbaquero/networking .
+docker login
+docker push carlosguzmanbaquero/networking
+
+//crear servicio de mongo
+docker service create -d --name db --network app-net mongo
+docker service ps db
+
+//crear servicio de app que consume la bd
+docker service create --name app --network app-net -p 3000:3000 carlosguzmanbaquero/networking
+
+docker service ps app
+
+//actualizar app de mongo 
+docker service update --env-add MONGO_URL=mongodb://db/test app
+
+//consultar bd mongo
+docker ps
+docker exec -it 0491a70c18cf bash
+mongo
+use test
+db.pings.find()
+
+//inspeccionar network
+docker network inspect app-net
+
+//remover servicio
+docker service rm app
+docker service rm db
+
+//remover network
+docker network rm app-net
+
+//crear servicios con stack usando docker compose
+docker stack deploy --compose-file stackfile.yml app
+
+//listar servicios del stack
+docker stack ls
+
+//tareas del stack
+docker stack ps app
+
+//servicios del stack
+docker stack services app
+
+//escalar servicio
+docker service scale app_app=3
+
+//remover aplicacion del stack
+docker stack rm app
+
+//para agregar varias app en un solo dominio
+docker network create --driver overlay proxy-net
+
+//crear servicio de traefik
+docker service create --name proxy --constraint=node.role==manager -p 80:80 -p 9090:8080 --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock --network proxy-net traefik:1.7 --docker --docker.swarmmode --docker.domain=cguzman.com --docker.watch --api
+
+//crear servicio1
+docker service create  --name app1 --network proxy-net --label traefik.port=3000 carlosguzmanbaquero/swarm-hostname
+curl -H "Host: app1.cguzman.com" http://localhost
+
+//crear servicio2
+docker service create  --name app2 --network proxy-net --label traefik.port=3000 carlosguzmanbaquero/swarm-hostname
+curl -H "Host: app2.cguzman.com" http://localhost
+
+//actualizar imagen de un servicio
+docker service update --image carlosguzmanbaquero/networking app2
+curl -H "Host: app1.cguzman.com" http://localhost
+curl -H "Host: app2.cguzman.com" http://localhost
+http://192.168.5.152:9090/dashboard/
+
+//crear un volumen
+docker volume create portainer_data
+
+//listar volumenes
+docker volume ls
+
+//crear servicio portainer
+docker service create --name portainer -p 9000:9000 --constraint node.role==manager --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock --mount type=volume,src=portainer_data,dst=/data portainer/portainer -H unix:///var/run/docker.sock
+
+//probar con el docker-stack del proyecto
+https://github.com/dockersamples/example-voting-app
+
+docker stack ls
+docker stack ps voting
+docker service ps voting_worker
+http://192.168.5.150:5000/
+http://192.168.5.150:5001/
+
+//para mantenimiento del swarm crear un cleanup
+docker service create -d \
+-e CLEAN_PERIOD=900 \
+-e DELAY_TIME=600 \
+--log-driver json-file \
+--log-opt max-size=1m \
+--log-opt max-file=2 \
+--name=cleanup \
+--mode global \
+--mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock \
+meltwater/docker-cleanup
+
+
